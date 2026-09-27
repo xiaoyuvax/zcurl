@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/zcurl/zcurl.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/zcurl.Tests/zcurl.Tests.csproj" />
+  </Folder>
+</Solution>
