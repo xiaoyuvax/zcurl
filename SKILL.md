@@ -91,7 +91,7 @@ printf '{}' | zcurl POST 'http://127.0.0.1:9090/agent/control?name=MainForm&ctrl
 ## 踩坑
 
 - **别把中文写进 argv**（PS/bash 都会坏），永远走 stdin / `--body-env`。
-- **PS 字符串管道**默认 `$OutputEncoding=ASCII` → 变 `????`，且会追加 `\r\n`；要精确字节别用 PS 管道，用 `--body-env`。
+- **PS 字符串管道**默认 `$OutputEncoding=ASCII` → 变 `????`，且会追加 `\r\n`（设成 `[Text.Encoding]::UTF8` 也一样会加 BOM）；要精确字节别用 PS 管道，用 `--body-env`。
 - `--body-env` 的变量必须当次赋值，别复用旧变量。
 - 响应中文乱码？那是你读 stdout 的方式不对：用 `--out file` 或按字节重定向，zcurl 不改编码。
 - 详细设计与构建见仓库 `README.md` / `README.en.md`。

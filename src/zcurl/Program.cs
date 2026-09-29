@@ -35,7 +35,7 @@ if (opt.Sub == "help")
 ZcurlCli.UnshiftIfUrl(opt);
 
 // ---------- 载荷读取 ----------
-async Task<(byte[] Body, BodyKind Kind, string? Error)> ReadBodyAsync(CliOptions o)
+async Task<(ReadOnlyMemory<byte> Body, BodyKind Kind, string? Error)> ReadBodyAsync(CliOptions o)
 {
     var kind = ZcurlCli.DecideBody(o.BodyEnv, Console.IsInputRedirected);
 
@@ -43,7 +43,7 @@ async Task<(byte[] Body, BodyKind Kind, string? Error)> ReadBodyAsync(CliOptions
     {
         var v = Environment.GetEnvironmentVariable(o.BodyEnv!);
         if (v is null)
-            return ([], BodyKind.None,
+            return (default, BodyKind.None,
                 $"环境变量 {o.BodyEnv} 未设置（--body-env 必须显式赋值，避免误发上一次的载荷）");
         return (Encoding.UTF8.GetBytes(v), BodyKind.Env, null);   // UTF-16 → UTF-8，进程内完成
     }
@@ -54,15 +54,15 @@ async Task<(byte[] Body, BodyKind Kind, string? Error)> ReadBodyAsync(CliOptions
         var src = Console.OpenStandardInput();
         var copy = src.CopyToAsync(ms);
         try { await copy.WaitAsync(TimeSpan.FromSeconds(20)); }
-        catch (TimeoutException) { return ([], BodyKind.None, "stdin 20 秒未关闭（可能继承了未关闭的管道）；请确认管道已结束再执行"); }
-        return (ms.ToArray(), BodyKind.Stdin, null);
+        catch (TimeoutException) { return (default, BodyKind.None, "stdin 20 秒未关闭（可能继承了未关闭的管道）；请确认管道已结束再执行"); }
+        return (ms.GetBuffer().AsMemory(0, (int)ms.Length), BodyKind.Stdin, null);  // 零拷贝：直接借用缓冲区
     }
 
-    return ([], BodyKind.None, null);
+    return (default, BodyKind.None, null);
 }
 
 // ---------- HTTP ----------
-async Task<int> SendAsync(string method, string url, string? key, byte[] body, CliOptions o)
+async Task<int> SendAsync(string method, string url, string? key, ReadOnlyMemory<byte> body, CliOptions o)
 {
     using var client = new HttpClient(new SocketsHttpHandler { UseProxy = false, Proxy = null });
     using var req = new HttpRequestMessage(new HttpMethod(method), url);
@@ -79,7 +79,7 @@ async Task<int> SendAsync(string method, string url, string? key, byte[] body, C
 
     if (body.Length > 0 || userCt)
     {
-        var content = new ByteArrayContent(body);
+        var content = new ReadOnlyMemoryContent(body);
         if (!userCt) content.Headers.TryAddWithoutValidation("Content-Type", "application/json");
         req.Content = content;
         foreach (var (n, v) in o.Headers)
@@ -102,19 +102,21 @@ async Task<int> SendAsync(string method, string url, string? key, byte[] body, C
 
     try
     {
-        using var resp = await client.SendAsync(req);
-        var bytes = await resp.Content.ReadAsByteArrayAsync();
+        // ResponseHeadersRead：不等整个 body 进内存，边收边写（省一次全量拷贝，--out 大文件峰值内存 1x）
+        using var resp = await client.SendAsync(req, HttpCompletionOption.ResponseHeadersRead);
+        var size = resp.Content.Headers.ContentLength is { } n ? $"{n}B" : "?B";
         if (o.OutFile is not null)
         {
             var path = ZcurlCli.MaybeDecode(o.OutFile);
-            File.WriteAllBytes(path, bytes);
-            Console.Error.WriteLine($"[{(int)resp.StatusCode}] {bytes.Length}B -> {path}");
+            using (var f = File.Create(path))
+                await resp.Content.CopyToAsync(f);
+            Console.Error.WriteLine($"[{(int)resp.StatusCode}] {new FileInfo(path).Length}B -> {path}");
         }
         else
         {
             using var stdout = Console.OpenStandardOutput();
-            await stdout.WriteAsync(bytes);
-            Console.Error.WriteLine($"[{(int)resp.StatusCode}] {bytes.Length}B");
+            await resp.Content.CopyToAsync(stdout);
+            Console.Error.WriteLine($"[{(int)resp.StatusCode}] {size}");
         }
         return resp.IsSuccessStatusCode ? 0 : 1;
     }
@@ -154,18 +156,18 @@ switch (opt.Sub)
     case "registry":
         if (opt.Pos.Count != 0) return Fail("用法: zcurl registry");
         return await SendAsync("GET", $"{ZcurlCli.BaseOf(opt)}/agent/registry",
-            ZcurlCli.KeyFor(opt, false), [], opt);
+            ZcurlCli.KeyFor(opt, false), default, opt);
 
     case "describe":
         if (opt.Pos.Count is < 1 or > 2) return Fail("用法: zcurl describe <instance> [format]");
         return await SendAsync("GET", ZcurlCli.DescribeUrl(ZcurlCli.BaseOf(opt), opt.Pos[0],
                 opt.Pos.Count > 1 ? opt.Pos[1] : null),
-            ZcurlCli.KeyFor(opt, false), [], opt);
+            ZcurlCli.KeyFor(opt, false), default, opt);
 
     case "get":
         if (opt.Pos.Count != 2) return Fail("用法: zcurl get <instance> <path>");
         return await SendAsync("GET", ZcurlCli.GetUrl(ZcurlCli.BaseOf(opt), opt.Pos[0], opt.Pos[1]),
-            ZcurlCli.KeyFor(opt, false), [], opt);
+            ZcurlCli.KeyFor(opt, false), default, opt);
 
     case "set":
     {
@@ -174,7 +176,7 @@ switch (opt.Sub)
         if (err is not null) return Fail(err);
         try
         {
-            var payload = Encoding.UTF8.GetBytes(ZcurlCli.ComposeSetBody(opt.Pos[1], body));
+            var payload = Encoding.UTF8.GetBytes(ZcurlCli.ComposeSetBody(opt.Pos[1], body.Span));
             return await SendAsync("POST", ZcurlCli.SetUrl(ZcurlCli.BaseOf(opt), opt.Pos[0]),
                 ZcurlCli.KeyFor(opt, false), payload, opt);
         }
@@ -188,7 +190,7 @@ switch (opt.Sub)
         if (err is not null) return Fail(err);
         try
         {
-            var payload = Encoding.UTF8.GetBytes(ZcurlCli.ComposeInvokeBody(body));
+            var payload = Encoding.UTF8.GetBytes(ZcurlCli.ComposeInvokeBody(body.Span));
             return await SendAsync("POST", ZcurlCli.InvokeUrl(ZcurlCli.BaseOf(opt), opt.Pos[0], opt.Pos[1]),
                 ZcurlCli.KeyFor(opt, false), payload, opt);
         }
@@ -202,7 +204,7 @@ switch (opt.Sub)
         if (err is not null) return Fail(err);
         try
         {
-            var payload = Encoding.UTF8.GetBytes(ZcurlCli.ComposeActionBody(body));
+            var payload = Encoding.UTF8.GetBytes(ZcurlCli.ComposeActionBody(body.Span));
             return await SendAsync("POST", ZcurlCli.ActionUrl(ZcurlCli.BaseOf(opt), opt.Pos[0], opt.Pos[1]),
                 ZcurlCli.KeyFor(opt, true), payload, opt);
         }
@@ -212,7 +214,7 @@ switch (opt.Sub)
     case "manifest": // B 面
         if (opt.Pos.Count != 1) return Fail("用法: zcurl manifest <instance>");
         return await SendAsync("GET", ZcurlCli.ManifestUrl(ZcurlCli.BaseOf(opt), opt.Pos[0]),
-            ZcurlCli.KeyFor(opt, true), [], opt);
+            ZcurlCli.KeyFor(opt, true), default, opt);
 
     case "enc":
     {
@@ -221,7 +223,7 @@ switch (opt.Sub)
         if (err is not null) return Fail(err);
         if (kind == BodyKind.None)
             return Fail("enc 没有输入。用法: printf '%s' '中文' | zcurl enc");
-        var ascii = Encoding.ASCII.GetBytes(ZcurlCli.PercentEncode(body));
+        var ascii = Encoding.ASCII.GetBytes(ZcurlCli.PercentEncode(body.Span));
         using var stdout = Console.OpenStandardOutput();
         await stdout.WriteAsync(ascii);
         return 0;

@@ -6,7 +6,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>zcurl</AssemblyName>
     <RootNamespace>Zcurl</RootNamespace>
-    <Version>0.1.0</Version>
+    <Version>0.2.0</Version>
     <Authors>Xiaoyuvax</Authors>
     <Description>UTF-8-safe HTTP client for Windows shells: ASCII-only argv, payload through stdin or environment, byte-exact JSON.</Description>
     <RepositoryUrl>https://github.com/xiaoyuvax/zcurl</RepositoryUrl>

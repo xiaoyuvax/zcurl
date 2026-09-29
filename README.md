@@ -6,10 +6,10 @@
 
 ## 下载
 
-单文件 `zcurl.exe`（**3.7 MB**，NativeAOT，无运行时依赖），放进 PATH 即用：
+单文件 `zcurl.exe`（**3.70 MB**，NativeAOT，无运行时依赖），放进 PATH 即用：
 
 ```powershell
-Invoke-WebRequest 'https://github.com/xiaoyuvax/zcurl/releases/download/v0.1.0/zcurl.exe' -OutFile .\zcurl.exe
+Invoke-WebRequest 'https://github.com/xiaoyuvax/zcurl/releases/download/v0.2.0/zcurl.exe' -OutFile .\zcurl.exe
 .\zcurl.exe selftest                                     # 本地回环自检，不访问外网
 Get-FileHash .\zcurl.exe -Algorithm SHA256               # 与 zcurl.exe.sha256 比对
 ```
@@ -34,19 +34,21 @@ zcurl 把这些坑全部排除在**工具边界之外**：命令行里出现任�
 
 1. **argv 只收 ASCII**。非 ASCII 立即 `exit 2` 并给出替代写法（stdin / `--body-env` / `zcurl enc`）。
 2. **body 走字节通道**：stdin（默认）或 `--body-env NAME`（宽字符环境变量，PowerShell 零配置）。
-3. **stdout = 原始响应字节**，stderr = 状态行，绝不混流、绝不改编码。
+3. **stdout = 原始响应字节**，stderr = 状态行，绝不混流、绝不改编码。收发都是流式直传（`ResponseHeadersRead` + `CopyToAsync`），内存峰值 = 1× 响应大小。
 
 ## 构建
 
 ```powershell
 dotnet build -c Release                 # 普通编译
-dotnet publish -c Release -r win-x64    # 单文件 AOT exe → src\zcurl\bin\Release\net10.0\win-x64\publish\zcurl.exe（3.69 MB）
+dotnet publish -c Release -r win-x64    # 单文件 AOT exe → src\zcurl\bin\Release\net10.0\win-x64\publish\zcurl.exe（3.70 MB）
 dotnet test                             # 单元测试（纯逻辑，无网络）
 ```
 
 要求 .NET 10 SDK + C++ AOT 工作负载。
 
-发布开关（`zcurl.csproj`）：`OptimizationPreference=Size` + 关诊断活动/EventSource/元数据更新器/调试器/异常堆栈。实测比 `Speed` 配置**更小也更快**：3.69 MB vs 4.87 MB，启动 32ms vs 34ms，回环请求 39 vs 44 ms（`bench.ps1`）。代价是崩溃时只报异常消息、不带堆栈——所有异常都在程序内 catch 成一行提示，影响可忽略。
+发布开关（`zcurl.csproj`）：`OptimizationPreference=Size` + 关诊断活动/EventSource/元数据更新器/调试器/异常堆栈。实测比 `Speed` 配置**更小也更快**：3.70 MB vs 4.87 MB，启动 32ms vs 34ms，回环请求 39 vs 44 ms（`bench.ps1`）。代价是崩溃时只报异常消息、不带堆栈——所有异常都在程序内 catch 成一行提示，影响可忽略。
+
+剩下的体积是 HTTPS 客户端本体，砍不动：实测 `System.Net.Http`（含 Sockets + TLS）占 1.80 MB（46%），`selftest` 占 0.30 MB，`System.Text.Json` DOM 占 0.15 MB，AOT 运行时地板 0.87 MB。换 `HttpClientHandler` 反而大 0.26 MB（Windows 原生 WinHTTP 开关实测无效）。
 
 ## 用法
 
@@ -109,7 +111,7 @@ zcurl get 'App#1' '%E4%B8%AD%E6%96%87'
 | bash 发中文 JSON | argv 变 GBK | `printf '%s' "$J" \| zcurl ...` |
 | 请求体带换行 | `-d` 会吞 | stdin 字节原样（等价 `--data-binary`） |
 | 响应中文 | 需要改 `[Console]::OutputEncoding` | `--out file` 或直接重定向字节，不改控制台 |
-| 传文件 / multipart | 支持 | **不支持**（v0.1 范围外，用 curl） |
+| 传文件 / multipart | 支持 | **不支持**（v0.2 范围外，用 curl） |
 | 传二进制 body | `--data-binary @-` | stdin 字节原样 |
 
 ## Puppet.Core 支持
@@ -140,25 +142,28 @@ zcurl selftest     # 起本地回环服务，分别用 stdin 与 --body-env 各�
 
 ## 字节保真矩阵（实测）
 
-对本地回显服务 `127.0.0.1:8731` 的实测，9 项全过：
+对本地回显服务的实测（载荷 = `{"prompt":"一个女孩，赛博朋克"}\n{"第二行":true}`，59 B），9 项全过（PowerShell 5.1 + Git Bash）：
 
 | 场景 | 结果 |
 |---|---|
-| PowerShell → stdin（字节直写） | ✅ 40B 精确 |
-| PowerShell → `--body-env`（中文环境变量） | ✅ 40B 精确 |
-| PowerShell 管道 + `$OutputEncoding=UTF8` | ✅ 精确（PS 追加 `\r\n` 属 PS 行为） |
-| PowerShell 管道默认编码 | ⚠️ 按设计变成 `????`（反面教材，README 已注明） |
+| PowerShell → stdin（字节直写） | ✅ 59B 精确 |
+| PowerShell → `--body-env`（中文环境变量） | ✅ 59B 精确 |
+| PowerShell 管道 + `$OutputEncoding=UTF8` | ⚠️ 64B = PS 5.1 自加 BOM(3) + 59B + `\r\n`(2)，原样透传 |
+| PowerShell 管道默认编码 | ⚠️ 37B，中文 → `?`（反面教材，README 已注明） |
 | PowerShell argv 中文 | ✅ 拒绝 exit 2，不发请求 |
-| Git Bash → stdin | ✅ 40B 精确 |
-| Git Bash → `--body-env` | ✅ 40B 精确 |
-| Git Bash argv 中文 | ✅ 拒绝 exit 2，不发请求 |
 | 空 body POST | ✅ `Content-Length: 0`，不发 `Content-Type` |
+| Git Bash → stdin | ✅ 59B 精确 |
+| Git Bash → `--body-env` | ✅ 59B 精确 |
+| Git Bash argv 中文 | ✅ 拒绝 exit 2，不发请求 |
+
+> 要精确字节就别用 PowerShell 的字符串管道（改 BOM、改编码、追加 `\r\n`），用 `--body-env` 或 `cmd /c "type file | zcurl ..."`。
 
 ## 已知边界
 
 - 不支持文件上传 / multipart / cookie jar / 代理（`UseProxy=false`，专攻本机与内网回环）。
 - `--body-env` 值受 Windows 环境块限制（约 32K 字符）；更大的载荷用 stdin。
-- PS 管道写入会追加 `\r\n`，要精确控制字节就别走 PS 字符串管道。
+- PS 管道写入会追加 `\r\n` 并可能加 BOM，要精确控制字节就别走 PS 字符串管道。
+- 响应无 `Content-Length`（chunked）时，stderr 状态行的字节数显示 `?B`（`--out` 仍报落盘文件的精确字节数）。
 
 ## 作为 Agent Skill 安装
 
