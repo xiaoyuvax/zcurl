@@ -1,0 +1,38 @@
+# build
+[Bb]in/
+[Oo]bj/
+[Oo]ut/
+artifacts/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# ide
+.vs/
+.idea/
+.vscode/
+*.DotSettings.user
+
+# publish drops
+publish/
+*.exe
+!tools/*.exe
+
+# test / coverage
+TestResults/
+coverage*.json
+coverage*.xml
+*.coverage
+
+# os
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# local secrets
+secrets/
+*.token
+
+# local-only notes (never commit)
+AGENTS.md

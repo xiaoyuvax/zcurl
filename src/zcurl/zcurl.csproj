@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>zcurl</AssemblyName>
+    <RootNamespace>Zcurl</RootNamespace>
+    <Version>0.1.0</Version>
+    <Authors>Xiaoyuvax</Authors>
+    <Description>UTF-8-safe HTTP client for Windows shells: ASCII-only argv, payload through stdin or environment, byte-exact JSON.</Description>
+    <RepositoryUrl>https://github.com/xiaoyuvax/zcurl</RepositoryUrl>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- NativeAOT 单文件发布：dotnet publish -c Release -r win-x64 -->
+    <PublishAot>true</PublishAot>
+    <!-- 实测（bench.ps1，2026-09-27）：Size 比 Speed 更小也更快（3.69MB vs 4.87MB，启动 30ms vs 34ms）——
+         本工具无计算热点，代码体积更小 = icache 更友好。故选 Size。 -->
+    <OptimizationPreference>Size</OptimizationPreference>
+    <!-- 裁剪无关功能换体积/速度：诊断活动管道、EventSource、元数据更新器、调试器支持、异常堆栈
+         （Stack 只剩消息：所有异常都 catch 成一行中文提示，用户拿不到堆栈也不需要） -->
+    <HttpActivityPropagationSupport>false</HttpActivityPropagationSupport>
+    <EventSourceSupport>false</EventSourceSupport>
+    <MetadataUpdaterSupport>false</MetadataUpdaterSupport>
+    <DebuggerSupport>false</DebuggerSupport>
+    <StackTraceSupport>false</StackTraceSupport>
+    <!-- 不用 UseSystemResourceKeys：只省 42KB，但会让 BCL 异常消息变成资源键（可读性差），不划算 -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="zcurl.Tests" />
+  </ItemGroup>
+</Project>
