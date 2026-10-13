@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json.Nodes;
 
 namespace Zcurl;
 
@@ -12,6 +13,7 @@ internal sealed class CliOptions
     public string? Key;
     public string? KeyB;
     public string? OutFile;
+    public string? Field;                   // 只打印响应 JSON 的这个字段
     public readonly List<(string Name, string Value)> Headers = new();
     public bool Verbose;
     public string? Fatal;
@@ -67,6 +69,7 @@ internal static class ZcurlCli
                 case "--key":
                 case "--key-b":
                 case "--out":
+                case "--field":
                 case "-H":
                     if (i + 1 >= args.Length) { o.Fatal = $"选项 {a} 缺少取值"; return o; }
                     string v = args[++i];
@@ -77,6 +80,7 @@ internal static class ZcurlCli
                         case "--key": o.Key = v; break;
                         case "--key-b": o.KeyB = v; break;
                         case "--out": o.OutFile = v; break;
+                        case "--field": o.Field = v; break;
                         default:
                             int colon = v.IndexOf(':');
                             if (colon <= 0) { o.Fatal = $"-H 需要 \"Name: Value\" 形式，收到 {v}"; return o; }
@@ -85,7 +89,10 @@ internal static class ZcurlCli
                     }
                     break;
                 default:
-                    if (a.StartsWith("--", StringComparison.Ordinal)) { o.Fatal = $"未知选项 {a}"; return o; }
+                    if (a.StartsWith("--", StringComparison.Ordinal))
+                    { o.Fatal = $"未知选项 {a}（zcurl 不是 curl，没有 {a}；用法见 zcurl -h）"; return o; }
+                    if (a.Length > 1 && a[0] == '-')
+                    { o.Fatal = $"未知选项 {a}（不支持 curl 的参数如 -X/-d/-o/--noproxy；用法见 zcurl -h）"; return o; }
                     if (o.Sub is null && Array.IndexOf(SubNames, a) >= 0) o.Sub = a;
                     else o.Pos.Add(a);
                     break;
@@ -207,6 +214,30 @@ internal static class ZcurlCli
         if (args is not null && !Json.IsObject(args))
             throw new FormatException("action 的 body 必须是 JSON 对象，如 {\"folderPath\":\"C:/work\"}");
         return Json.Obj(("args", args), ("callId", Guid.NewGuid().ToString("N")));
+    }
+
+    // ---------- 响应字段提取（--field） ----------
+
+    /// <summary>取响应 JSON 的单个字段：字符串去引号原样输出，其余输出紧凑 JSON。
+    /// 非 JSON / 无该字段 / 字段为 null → null（调用方给一行提示）。顶层为数组时取首个同名字段。</summary>
+    public static string? ExtractField(string json, string field)
+    {
+        if (string.IsNullOrEmpty(field)) return null;
+        JsonNode? node;
+        try { node = JsonNode.Parse(json); }
+        catch (System.Text.Json.JsonException) { return null; }
+        if (node is JsonObject o) return Take(o[field]);
+        if (node is JsonArray a)
+            foreach (var e in a)
+                if (e is JsonObject eo && eo.ContainsKey(field)) return Take(eo[field]);
+        return null;
+
+        static string? Take(JsonNode? v) => v switch
+        {
+            null => null,
+            JsonValue jv when jv.TryGetValue<string>(out var s) => s,
+            _ => v.ToJsonString(),
+        };
     }
 }
 

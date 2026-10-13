@@ -69,7 +69,10 @@ zcurl get 'App#1' '%E4%B8%AD%E6%96%87'
 | `printf '%s' '{"key":"v"}' \| zcurl action <实例> <action>` | POST `/appagent/actions/<action>` | JSON 对象（自动补 `callId`） |
 | `zcurl manifest <实例>` | GET `/appagent/manifest` | — |
 
+body 形状三套，写错 exit 2：`set` = JSON 值、`invoke` = JSON 数组、`action` = JSON 对象。
+`--field NAME` 只打印响应 JSON 的该字段（字符串去引号）：`zcurl get 'App#1' 'Pic.Image' --field type`。
 key：A 面 `ZCURL_KEY`，B 面 `ZCURL_KEY_B`（`action`/`manifest` 自动用 B，缺失回落 A）。
+**404 = 先查 key**：Puppet 密钥错误返回 404 而非 401，stderr 会带这行提示；别急着改 URL。
 实例名里的 `#` 会自动转义（`App#1` → `App%231`），无需手动 encode。
 `/agent/control`、`/agent/state`、`/agent/logs` 用原始模式即可。
 
@@ -91,7 +94,10 @@ printf '{}' | zcurl POST 'http://127.0.0.1:9090/agent/control?name=MainForm&ctrl
 ## 踩坑
 
 - **别把中文写进 argv**（PS/bash 都会坏），永远走 stdin / `--body-env`。
+- **这不是 curl**：`-X` / `-d` / `-o` / `--noproxy` 等未知选项直接 exit 2 并提示；zcurl 固定直连（`UseProxy=false`），别带 curl 的代理参数。
+- **404 先查 key**：Puppet 密钥错误返回 404 而非 401 → 检查 `--key` / `$ZCURL_KEY`（B 面 `--key-b` / `$ZCURL_KEY_B`），别改 URL。
 - **PS 字符串管道**默认 `$OutputEncoding=ASCII` → 变 `????`，且会追加 `\r\n`（设成 `[Text.Encoding]::UTF8` 也一样会加 BOM）；要精确字节别用 PS 管道，用 `--body-env`。
 - `--body-env` 的变量必须当次赋值，别复用旧变量。
+- PS 里读中文响应先设 `[Console]::OutputEncoding = [Text.Encoding]::UTF8`，否则控制台显示为 GBK 乱码（响应字节本身是 UTF-8，zcurl 不改编码）。
 - 响应中文乱码？那是你读 stdout 的方式不对：用 `--out file` 或按字节重定向，zcurl 不改编码。
 - 详细设计与构建见仓库 `README.md` / `README.en.md`。

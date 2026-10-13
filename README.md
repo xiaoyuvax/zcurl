@@ -6,10 +6,10 @@
 
 ## 下载
 
-单文件 `zcurl.exe`（**3.70 MB**，NativeAOT，无运行时依赖），放进 PATH 即用：
+单文件 `zcurl.exe`（**3.71 MB**，NativeAOT，无运行时依赖），放进 PATH 即用：
 
 ```powershell
-Invoke-WebRequest 'https://github.com/xiaoyuvax/zcurl/releases/download/v0.2.0/zcurl.exe' -OutFile .\zcurl.exe
+ Invoke-WebRequest 'https://github.com/xiaoyuvax/zcurl/releases/download/v0.3.0/zcurl.exe' -OutFile .\zcurl.exe
 .\zcurl.exe selftest                                     # 本地回环自检，不访问外网
 Get-FileHash .\zcurl.exe -Algorithm SHA256               # 与 zcurl.exe.sha256 比对
 ```
@@ -40,7 +40,7 @@ zcurl 把这些坑全部排除在**工具边界之外**：命令行里出现任�
 
 ```powershell
 dotnet build -c Release                 # 普通编译
-dotnet publish -c Release -r win-x64    # 单文件 AOT exe → src\zcurl\bin\Release\net10.0\win-x64\publish\zcurl.exe（3.70 MB）
+dotnet publish -c Release -r win-x64    # 单文件 AOT exe → src\zcurl\bin\Release\net10.0\win-x64\publish\zcurl.exe（3.71 MB）
 dotnet test                             # 单元测试（纯逻辑，无网络）
 ```
 
@@ -65,8 +65,13 @@ zcurl enc                                stdin → 百分号编码（ASCII 输�
 zcurl selftest                           本地回环字节保真自检（不访问外网）
 ```
 
-选项：`--body-env NAME`、`--base URL`、`--key KEY`、`--key-b KEY`、`-H "Name: Value"`（可重复）、`--out FILE`、`-v`、`-h`。
+选项：`--body-env NAME`、`--base URL`、`--key KEY`、`--key-b KEY`、`--field NAME`（只打印响应 JSON 的该字段）、`-H "Name: Value"`（可重复）、`--out FILE`、`-v`、`-h`。
 子命令基址默认 `http://127.0.0.1:9090`（`--base` 或 `ZCURL_BASE` 覆盖），key 默认 `ZCURL_KEY` / `ZCURL_KEY_B`。
+
+body 形状三套，写错 exit 2：`set` = JSON 值、`invoke` = JSON 数组、`action` = JSON 对象。
+zcurl **不是 curl**：`-X` / `-d` / `-o` / `--noproxy` 等一律 exit 2 并提示（代理固定 `UseProxy=false` 直连）。
+Puppet 返回 **404 常是 Bearer 密钥不对**（密钥错误伪装成 404 而非 401）→ 先查 `--key` / `$ZCURL_KEY`，stderr 会带这行提示。
+PS 控制台读中文响应先设 `[Console]::OutputEncoding = [Text.Encoding]::UTF8`，否则显示为 GBK 乱码（zcurl 本身不改编码）。
 
 ### 中文载荷：两条正道
 
@@ -100,7 +105,7 @@ zcurl get 'App#1' '%E4%B8%AD%E6%96%87'
 | code | 含义 |
 |---|---|
 | 0 | 2xx |
-| 1 | HTTP 非 2xx 或网络失败 |
+| 1 | HTTP 非 2xx 或网络失败 / `--field` 字段不存在 |
 | 2 | 用法错误 / argv 含非 ASCII / body JSON 不合法 / 环境变量缺失 |
 
 ## 与 curl 的对照
@@ -111,8 +116,9 @@ zcurl get 'App#1' '%E4%B8%AD%E6%96%87'
 | bash 发中文 JSON | argv 变 GBK | `printf '%s' "$J" \| zcurl ...` |
 | 请求体带换行 | `-d` 会吞 | stdin 字节原样（等价 `--data-binary`） |
 | 响应中文 | 需要改 `[Console]::OutputEncoding` | `--out file` 或直接重定向字节，不改控制台 |
-| 传文件 / multipart | 支持 | **不支持**（v0.2 范围外，用 curl） |
+| 传文件 / multipart | 支持 | **不支持**（v0.3 范围外，用 curl） |
 | 传二进制 body | `--data-binary @-` | stdin 字节原样 |
+| `-X` / `-d` / `--noproxy` 等参数 | 支持 | **不支持**（未知选项 exit 2 + 提示，防止带着 curl 习惯写出静默错的命令） |
 
 ## Puppet.Core 支持
 
@@ -122,6 +128,7 @@ zcurl get 'App#1' '%E4%B8%AD%E6%96%87'
 zcurl registry
 zcurl describe 'App#1'
 zcurl get 'App#1' 'Display.Text'
+zcurl get 'App#1' 'PicResult.Image' --field type     # 只取一个字段（复杂对象判据：value=null 而 type 非空 = 有值）
 printf '%s' '"新值"' | zcurl set 'App#1' 'Display.Text'
 printf '%s' '["MoveAction",10,20]' | zcurl invoke 'App#1' 'MoveAction'
 printf '%s' '{"folderPath":"C:/work"}' | zcurl action 'App#1' 'OpenAction'   # B 面，用 ZCURL_KEY_B

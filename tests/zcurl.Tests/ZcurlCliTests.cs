@@ -78,6 +78,50 @@ public class ZcurlCliTests
     public void Parse_UnknownLongOption_IsFatal()
         => Assert.NotNull(ZcurlCli.Parse(["--frobnicate"]).Fatal);
 
+    [Theory]
+    [InlineData("-X")]
+    [InlineData("-d")]
+    [InlineData("--noproxy")]
+    public void Parse_CurlStyleOption_IsFatalWithHint(string flag)
+    {
+        var fatal = ZcurlCli.Parse([flag]).Fatal;
+        Assert.NotNull(fatal);
+        Assert.Contains("curl", fatal, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Parse_FieldOption_IsCaptured()
+    {
+        var o = ZcurlCli.Parse(["get", "App#1", "Text", "--field", "value"]);
+        Assert.Equal("value", o.Field);
+        Assert.Null(o.Fatal);
+        Assert.NotNull(ZcurlCli.Parse(["--field"]).Fatal);   // 缺取值
+    }
+
+    // ---------- 响应字段提取（--field） ----------
+
+    [Fact]
+    public void ExtractField_StringUnquoted_ObjectCompact()
+    {
+        Assert.Equal("已打开图像库", ZcurlCli.ExtractField("""{"ok":true,"message":"已打开图像库"}""", "message"));
+        Assert.Equal("""{"a":1}""", ZcurlCli.ExtractField("""{"result":{"a":1}}""", "result"));
+        Assert.Equal("42", ZcurlCli.ExtractField("""{"n":42}""", "n"));
+        Assert.Equal("true", ZcurlCli.ExtractField("""{"ok":true}""", "ok"));
+    }
+
+    [Theory]
+    [InlineData("""{"ok":true}""", "missing")]
+    [InlineData("not json", "value")]
+    [InlineData("""["a"]""", "value")]
+    [InlineData("""{"value":null}""", "value")]
+    [InlineData("""{"value":"x"}""", "")]
+    public void ExtractField_MissingOrNull_ReturnsNull(string json, string field)
+        => Assert.Null(ZcurlCli.ExtractField(json, field));
+
+    [Fact]
+    public void ExtractField_TopLevelArray_TakesFirstMatch()
+        => Assert.Equal("v1", ZcurlCli.ExtractField("""[{"name":"v1"},{"name":"v2"}]""", "name"));
+
     [Fact]
     public void UnshiftIfUrl_FallsBackToRawMode_WhenLowercaseMethodGotUrl()
     {

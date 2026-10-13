@@ -6,10 +6,10 @@ In one line: **ASCII-only argv; Chinese payloads go through stdin or an environm
 
 ## Download
 
-Single-file `zcurl.exe` (**3.70 MB**, NativeAOT, no runtime dependencies) — drop it on your `PATH`:
+Single-file `zcurl.exe` (**3.71 MB**, NativeAOT, no runtime dependencies) — drop it on your `PATH`:
 
 ```powershell
-Invoke-WebRequest 'https://github.com/xiaoyuvax/zcurl/releases/download/v0.2.0/zcurl.exe' -OutFile .\zcurl.exe
+ Invoke-WebRequest 'https://github.com/xiaoyuvax/zcurl/releases/download/v0.3.0/zcurl.exe' -OutFile .\zcurl.exe
 .\zcurl.exe selftest                        # loopback self-test, never touches the network
 Get-FileHash .\zcurl.exe -Algorithm SHA256  # compare against zcurl.exe.sha256
 ```
@@ -40,7 +40,7 @@ zcurl moves those traps **behind a tool boundary**: any non-ASCII argument is re
 
 ```powershell
 dotnet build -c Release                 # compile
-dotnet publish -c Release -r win-x64    # single-file AOT exe → src\zcurl\bin\Release\net10.0\win-x64\publish\zcurl.exe (3.70 MB)
+dotnet publish -c Release -r win-x64    # single-file AOT exe → src\zcurl\bin\Release\net10.0\win-x64\publish\zcurl.exe (3.71 MB)
 dotnet test                             # unit tests (pure logic, no network)
 ```
 
@@ -65,8 +65,13 @@ zcurl enc                               stdin → percent-encoded ASCII
 zcurl selftest                          loopback byte-fidelity self-test (no network)
 ```
 
-Options: `--body-env NAME`, `--base URL`, `--key KEY`, `--key-b KEY`, `-H "Name: Value"` (repeatable), `--out FILE`, `-v`, `-h`.
+Options: `--body-env NAME`, `--base URL`, `--key KEY`, `--key-b KEY`, `--field NAME` (print only that field of a JSON response), `-H "Name: Value"` (repeatable), `--out FILE`, `-v`, `-h`.
 Base URL defaults to `http://127.0.0.1:9090` (`--base` / `ZCURL_BASE`), keys to `ZCURL_KEY` / `ZCURL_KEY_B`.
+
+Three body shapes, wrong one → `exit 2`: `set` = JSON value, `invoke` = JSON array, `action` = JSON object.
+zcurl is **not curl**: `-X` / `-d` / `-o` / `--noproxy` and friends are rejected (`exit 2`) with a hint; proxies are always off (`UseProxy=false`).
+A Puppet **404 usually means a bad Bearer key** (wrong key returns 404, not 401) → check `--key` / `$ZCURL_KEY`; stderr carries that hint.
+To read Chinese responses in a PowerShell console, set `[Console]::OutputEncoding = [Text.Encoding]::UTF8` first, otherwise the console renders GBK mojibake (zcurl never re-encodes).
 
 ### Two supported ways to send Chinese payloads
 
@@ -100,7 +105,7 @@ Values that already contain `%XX` are treated as encoded and are never double-en
 | code | meaning |
 |---|---|
 | 0 | 2xx |
-| 1 | non-2xx HTTP status or network failure |
+| 1 | non-2xx HTTP status, network failure, or `--field` key missing from the response |
 | 2 | usage error / non-ASCII argv / invalid JSON body / missing env var |
 
 ## Versus curl
@@ -111,7 +116,8 @@ Values that already contain `%XX` are treated as encoded and are never double-en
 | Chinese JSON from bash | argv becomes GBK | `printf '%s' "$J" \| zcurl ...` |
 | Body containing newlines | `-d` eats them | stdin bytes untouched |
 | Chinese response | must tweak `[Console]::OutputEncoding` | `--out file`, console untouched |
-| File upload / multipart | supported | **not supported** (out of scope for v0.2) |
+| File upload / multipart | supported | **not supported** (out of scope for v0.3) |
+| `-X` / `-d` / `--noproxy` flags | supported | **rejected** (`exit 2` + hint), so curl habits cannot produce a silently wrong command |
 
 ## Puppet.Core support
 
@@ -121,6 +127,7 @@ Values that already contain `%XX` are treated as encoded and are never double-en
 zcurl registry
 zcurl describe 'App#1'
 zcurl get 'App#1' 'Display.Text'
+zcurl get 'App#1' 'PicResult.Image' --field type   # one field only (complex-object probe: value=null + non-null type = has value)
 printf '%s' '"new value"' | zcurl set 'App#1' 'Display.Text'
 printf '%s' '["MoveAction",10,20]' | zcurl invoke 'App#1' 'MoveAction'
 printf '%s' '{"folderPath":"C:/work"}' | zcurl action 'App#1' 'OpenAction'   # channel B, uses ZCURL_KEY_B
