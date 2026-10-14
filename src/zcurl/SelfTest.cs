@@ -6,7 +6,7 @@ using System.Text;
 namespace Zcurl;
 
 /// <summary>
-/// 本地回环字节保真自检：起一个最小 HTTP 回显服务，用 stdin 与 --body-env 各起一个自身子进程各发一次，
+/// 本地回环字节保真自检：起一个最小 HTTP 回显服务，用 stdin、--body-env 与 --body-file 各起一个自身子进程各发一次，
 /// 比对服务端收到的字节与 Content-Type。不访问外网。
 /// </summary>
 internal static class SelfTest
@@ -26,17 +26,29 @@ internal static class SelfTest
         var received = new List<(string Ct, byte[] Body)>();
         var server = Task.Run(async () =>
         {
-            for (int i = 0; i < 2; i++)
+            for (int i = 0; i < 3; i++)
                 received.Add(await HandleAsync(listener));
         });
 
         var (file, prefix) = SelfPath();
         var log = new StringBuilder();
 
+        string bodyFile = Path.Combine(Path.GetTempPath(), "zcurl-selftest-body.bin");
+        try { File.WriteAllBytes(bodyFile, expected); }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"selftest: 写临时文件失败 {ex.Message}");
+            listener.Stop();
+            return 1;
+        }
+
         int stdinExit = await RunChildAsync(file, prefix, ["POST", url],
             stdin: expected, env: null, log);
         int envExit = await RunChildAsync(file, prefix, ["POST", url, "--body-env", "ZCURL_SELFTEST_BODY"],
             stdin: null, env: ("ZCURL_SELFTEST_BODY", Payload), log);
+        int fileExit = await RunChildAsync(file, prefix, ["POST", url, "--body-file", bodyFile],
+            stdin: null, env: null, log);
+        try { File.Delete(bodyFile); } catch { /* ignore */ }
 
         try
         {
@@ -54,7 +66,8 @@ internal static class SelfTest
         bool ok = true;
         ok &= Check("stdin 路径", stdinExit, received, 0, expected, log);
         ok &= Check("--body-env 路径", envExit, received, 1, expected, log);
-        Console.Error.WriteLine(ok ? "selftest: ALL PASS (2/2)" : "selftest: FAIL");
+        ok &= Check("--body-file 路径", fileExit, received, 2, expected, log);
+        Console.Error.WriteLine(ok ? "selftest: ALL PASS (3/3)" : "selftest: FAIL");
         return ok ? 0 : 1;
     }
 

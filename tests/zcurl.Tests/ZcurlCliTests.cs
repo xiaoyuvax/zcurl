@@ -98,8 +98,78 @@ public class ZcurlCliTests
         Assert.NotNull(ZcurlCli.Parse(["--field"]).Fatal);   // 缺取值
     }
 
-    // ---------- 响应字段提取（--field） ----------
+    [Fact]
+    public void Parse_QueryOption_CollectsRepeatedPairs()
+    {
+        var o = ZcurlCli.Parse(["registry", "-q", "type=WinForm", "-q", "limit=10", "-q", "keyword=%E4%B8%AD"]);
+        Assert.Equal("registry", o.Sub);
+        Assert.Equal([("type", "WinForm"), ("limit", "10"), ("keyword", "%E4%B8%AD")], o.Query);
+        Assert.Null(o.Fatal);
+    }
 
+    [Fact]
+    public void Parse_QueryOption_MissingOrMalformed_IsFatal()
+    {
+        Assert.NotNull(ZcurlCli.Parse(["-q"]).Fatal);          // 缺取值
+        Assert.NotNull(ZcurlCli.Parse(["-q", "noequals"]).Fatal);
+        Assert.NotNull(ZcurlCli.Parse(["-q", "=v"]).Fatal);    // 空 key
+    }
+
+    [Fact]
+    public void Parse_NewOptions_AreCaptured()
+    {
+        var o = ZcurlCli.Parse(["--body-file", "p.json", "--profile", "App#1", "--timeout", "5000",
+            "--expect", "400", "get", "X", "Y"]);
+        Assert.Equal("p.json", o.BodyFile);
+        Assert.Equal("App#1", o.Profile);
+        Assert.Equal(5000, o.TimeoutMs);
+        Assert.Equal(400, o.ExpectStatus);
+        Assert.Null(o.Fatal);
+        Assert.NotNull(ZcurlCli.Parse(["--body-file"]).Fatal);   // 缺取值
+        Assert.NotNull(ZcurlCli.Parse(["--profile"]).Fatal);
+    }
+
+    [Theory]
+    [InlineData("--timeout", "0")]
+    [InlineData("--timeout", "-5")]
+    [InlineData("--timeout", "abc")]
+    [InlineData("--timeout", "1.5")]
+    [InlineData("--expect", "99")]
+    [InlineData("--expect", "600")]
+    [InlineData("--expect", "x")]
+    public void Parse_TimeoutExpect_BadValues_IsFatal(string flag, string value)
+        => Assert.NotNull(ZcurlCli.Parse([flag, value]).Fatal);
+
+    [Fact]
+    public void StateUrl_EscapesInstanceName()
+        => Assert.Equal("http://h/agent/state?name=App%231", ZcurlCli.StateUrl("http://h", "App#1"));
+
+    [Fact]
+    public void ApplyQuery_NoQuery_LeavesUrlUntouched()
+    {
+        var url = "http://h/agent/get?name=App%231&path=Text";
+        Assert.Equal(url, ZcurlCli.ApplyQuery(url, []));
+    }
+
+    [Fact]
+    public void ApplyQuery_AppendsWithAmp_WhenUrlAlreadyHasQuery()
+        => Assert.Equal("http://h/agent/registry?type=WinForm&limit=10",
+            ZcurlCli.ApplyQuery("http://h/agent/registry", [("type", "WinForm"), ("limit", "10")]));
+
+    [Fact]
+    public void ApplyQuery_EncodesValues_ButNotPreEncoded()
+    {
+        Assert.Equal("http://h/x?name=App%231", ZcurlCli.ApplyQuery("http://h/x", [("name", "App#1")]));
+        Assert.Equal("http://h/x?path=%E6%96%87%E6%9C%AC", ZcurlCli.ApplyQuery("http://h/x", [("path", "%E6%96%87%E6%9C%AC")]));
+        Assert.Equal("http://h/x?raw=a%3Db", ZcurlCli.ApplyQuery("http://h/x", [("raw", "a=b")]));
+    }
+
+    [Fact]
+    public void ApplyQuery_RawModeUrl_WithoutQuery_GetsQuestionMark()
+        => Assert.Equal("http://h/agent/control?name=MainForm",
+            ZcurlCli.ApplyQuery("http://h/agent/control", [("name", "MainForm")]));
+
+    // ---------- 响应字段提取（--field） ----------
     [Fact]
     public void ExtractField_StringUnquoted_ObjectCompact()
     {
@@ -121,6 +191,22 @@ public class ZcurlCliTests
     [Fact]
     public void ExtractField_TopLevelArray_TakesFirstMatch()
         => Assert.Equal("v1", ZcurlCli.ExtractField("""[{"name":"v1"},{"name":"v2"}]""", "name"));
+
+    [Fact]
+    public void ExtractField_DotPath_NavigatesObjectsAndArrays()
+    {
+        Assert.Equal("0.75", ZcurlCli.ExtractField("""{"data":{"camera":{"alpha":0.75}}}""", "data.camera.alpha"));
+        Assert.Equal("y", ZcurlCli.ExtractField("""{"items":[{"n":"x"},{"n":"y"}]}""", "items.1.n"));
+        Assert.Equal("10", ZcurlCli.ExtractField("""{"a":[10]}""", "a.0"));
+        Assert.Equal("1", ZcurlCli.ExtractField("""[{"cfg":{"v":1}}]""", "cfg.v"));     // 根数组回退 + 点路径
+        Assert.Null(ZcurlCli.ExtractField("""{"a":{"b":1}}""", "a.c"));                // 中段缺失
+        Assert.Null(ZcurlCli.ExtractField("""{"a":[10]}""", "a.x"));                   // 数组段非数字
+        Assert.Null(ZcurlCli.ExtractField("""{"a":{"b":1}}""", "a.b.c"));              // 标量下再取段
+    }
+
+    [Fact]
+    public void ExtractField_LiteralDottedKey_StillWins_LegacySemanticsPreserved()
+        => Assert.Equal("1", ZcurlCli.ExtractField("""{"a.b":1,"a":{"b":2}}""", "a.b"));
 
     [Fact]
     public void UnshiftIfUrl_FallsBackToRawMode_WhenLowercaseMethodGotUrl()
@@ -163,12 +249,22 @@ public class ZcurlCliTests
     // ---------- body 来源 ----------
 
     [Fact]
-    public void DecideBody_ExplicitEnvWins_StdinIgnored()
+    public void DecideBody_ExplicitSourcesWin_StdinFallback()
     {
-        Assert.Equal(BodyKind.Env, ZcurlCli.DecideBody("B", stdinRedirected: true));
-        Assert.Equal(BodyKind.Env, ZcurlCli.DecideBody("B", stdinRedirected: false));
-        Assert.Equal(BodyKind.Stdin, ZcurlCli.DecideBody(null, stdinRedirected: true));
-        Assert.Equal(BodyKind.None, ZcurlCli.DecideBody(null, stdinRedirected: false));
+        Assert.Equal((BodyKind.Env, (string?)null), ZcurlCli.DecideBody("B", null, stdinRedirected: true));
+        Assert.Equal((BodyKind.Env, (string?)null), ZcurlCli.DecideBody("B", null, stdinRedirected: false));
+        Assert.Equal((BodyKind.File, (string?)null), ZcurlCli.DecideBody(null, "f.json", stdinRedirected: true));   // file 压过 stdin
+        Assert.Equal((BodyKind.File, (string?)null), ZcurlCli.DecideBody(null, "f.json", stdinRedirected: false));
+        Assert.Equal((BodyKind.Stdin, (string?)null), ZcurlCli.DecideBody(null, null, stdinRedirected: true));
+        Assert.Equal((BodyKind.None, (string?)null), ZcurlCli.DecideBody(null, null, stdinRedirected: false));
+    }
+
+    [Fact]
+    public void DecideBody_EnvAndFileTogether_IsFatal()
+    {
+        var (kind, fatal) = ZcurlCli.DecideBody("B", "f.json", stdinRedirected: false);
+        Assert.Equal(BodyKind.None, kind);
+        Assert.NotNull(fatal);
     }
 
     // ---------- 百分号编码 ----------
@@ -293,6 +389,71 @@ public class ZcurlCliTests
         Assert.Throws<FormatException>(() => ZcurlCli.ComposeActionBody(Encoding.UTF8.GetBytes("[1,2]")));
     }
 
+    // ---------- 发现档案（--profile）：解析与选择是纯函数 ----------
+
+    [Fact]
+    public void ParseProfileJson_RealShape_ParsesAll()
+    {
+        var (ep, key, pid, err) = ZcurlCli.ParseProfileJson(
+            """{"app":"X","endpoint":"http://127.0.0.1:8000","key":"abc","protocol":"appagent/1.0","pid":123,"registeredAt":"2026-10-13T04:31:38Z"}""");
+        Assert.Null(err);
+        Assert.Equal("http://127.0.0.1:8000", ep);
+        Assert.Equal("abc", key);
+        Assert.Equal(123, pid);
+    }
+
+    [Theory]
+    [InlineData("""{"endpoint":"http://h","key":"k"}""", "pid")]
+    [InlineData("""{"endpoint":"http://h","pid":1}""", "key")]
+    [InlineData("""{"key":"k","pid":1}""", "endpoint")]
+    [InlineData("""{"endpoint":"ftp://h","key":"k","pid":1}""", "http")]
+    [InlineData("not json", "JSON")]
+    [InlineData("[1,2]", "对象")]
+    public void ParseProfileJson_BadShape_ReturnsError(string json, string expect)
+    {
+        var err = ZcurlCli.ParseProfileJson(json).Error;
+        Assert.NotNull(err);
+        Assert.Contains(expect, err, StringComparison.OrdinalIgnoreCase);
+    }
+
+    static ZcurlCli.ProfileCandidate Cand(string path, int? pid, bool alive, string? err = null,
+        DateTime? mtime = null, string? ep = "http://h", string? key = "k")
+        => new(path, ep, key, pid, alive, mtime ?? DateTime.UnixEpoch, err);
+
+    [Fact]
+    public void SelectProfile_NewestUsableWins_DeadPidAndParseErrorRejected()
+    {
+        var t0 = DateTime.UnixEpoch;
+        var cands = new[]
+        {
+            Cand("a.json", 1, true, mtime: t0),
+            Cand("b.json", 2, true, mtime: t0.AddMinutes(5)),
+            Cand("c.json", 3, false, mtime: t0.AddMinutes(9)),                         // 死 pid
+            Cand("d.json", null, false, err: "JSON 解析失败", mtime: t0.AddMinutes(10)), // 解析失败（mtime 最新也不选）
+        };
+        Assert.Equal("b.json", ZcurlCli.SelectProfile(cands)!.Value.Path);
+    }
+
+    [Fact]
+    public void SelectProfile_NoneUsable_ReturnsNull()
+    {
+        Assert.Null(ZcurlCli.SelectProfile([]));
+        Assert.Null(ZcurlCli.SelectProfile([Cand("a.json", 1, false)]));               // 全死
+        Assert.Null(ZcurlCli.SelectProfile([Cand("a.json", null, false, err: "坏")])); // 全解析失败
+    }
+
+    // ---------- --expect 退出码语义 ----------
+
+    [Theory]
+    [InlineData(204, null, 0)]
+    [InlineData(404, null, 1)]
+    [InlineData(400, null, 1)]
+    [InlineData(404, 404, 0)]     // 语义翻转：匹配即成功（404 匹配也 exit 0）
+    [InlineData(400, 404, 1)]
+    [InlineData(200, 400, 1)]
+    public void ExpectExit_MatchWins_OtherwiseClassic2xx(int status, int? expect, int expected)
+        => Assert.Equal(expected, ZcurlCli.ExpectExit(status, expect));
+
     // ---------- 基址与 key（临时改环境变量，测试内恢复） ----------
 
     [Fact]
@@ -343,6 +504,51 @@ public class ZcurlCliTests
             var both = new CliOptions { Key = "cliA", KeyB = "cliB" };
             Assert.Equal("cliB", ZcurlCli.KeyFor(both, channelB: true));
             Assert.Equal("cliA", ZcurlCli.KeyFor(both, channelB: false));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("ZCURL_KEY", savedA);
+            Environment.SetEnvironmentVariable("ZCURL_KEY_B", savedB);
+        }
+    }
+
+    [Fact]
+    public void BaseOf_ProfileSitsBetweenCliFlagAndEnv()
+    {
+        string? saved = Environment.GetEnvironmentVariable("ZCURL_BASE");
+        try
+        {
+            Environment.SetEnvironmentVariable("ZCURL_BASE", "http://env:1/");
+            Assert.Equal("http://prof:9", ZcurlCli.BaseOf(new CliOptions { ProfileBase = "http://prof:9" }));
+            Assert.Equal("http://cli:2", ZcurlCli.BaseOf(new CliOptions { ProfileBase = "http://prof:9", BaseUrl = "http://cli:2" }));
+
+            Environment.SetEnvironmentVariable("ZCURL_BASE", null);
+            Assert.Equal("http://prof:9", ZcurlCli.BaseOf(new CliOptions { ProfileBase = "http://prof:9" }));
+        }
+        finally { Environment.SetEnvironmentVariable("ZCURL_BASE", saved); }
+    }
+
+    [Fact]
+    public void KeyFor_ProfileSitsBetweenFlagsAndEnv()
+    {
+        string? savedA = Environment.GetEnvironmentVariable("ZCURL_KEY");
+        string? savedB = Environment.GetEnvironmentVariable("ZCURL_KEY_B");
+        try
+        {
+            Environment.SetEnvironmentVariable("ZCURL_KEY", null);
+            Environment.SetEnvironmentVariable("ZCURL_KEY_B", null);
+            var prof = new CliOptions { ProfileKey = "prof" };
+            Assert.Equal("prof", ZcurlCli.KeyFor(prof, channelB: false));
+            Assert.Equal("prof", ZcurlCli.KeyFor(prof, channelB: true));
+
+            Environment.SetEnvironmentVariable("ZCURL_KEY", "envA");
+            Environment.SetEnvironmentVariable("ZCURL_KEY_B", "envB");
+            Assert.Equal("prof", ZcurlCli.KeyFor(prof, channelB: false));   // profile 压过环境变量
+            Assert.Equal("prof", ZcurlCli.KeyFor(prof, channelB: true));
+
+            Assert.Equal("cliA", ZcurlCli.KeyFor(new CliOptions { Key = "cliA", ProfileKey = "prof" }, channelB: false));  // flag 压过 profile
+            Assert.Equal("cliA", ZcurlCli.KeyFor(new CliOptions { Key = "cliA", ProfileKey = "prof" }, channelB: true));
+            Assert.Equal("cliB", ZcurlCli.KeyFor(new CliOptions { Key = "cliA", KeyB = "cliB", ProfileKey = "prof" }, channelB: true));
         }
         finally
         {
