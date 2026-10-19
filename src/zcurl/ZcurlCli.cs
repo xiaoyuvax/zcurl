@@ -19,7 +19,7 @@ internal sealed class CliOptions
     public string? Key;
     public string? KeyB;
     public string? OutFile;
-    public string? Field;                   // 只打印响应 JSON 的这个字段（支持点路径 a.b.0.c）
+    public readonly List<string> Fields = new();   // 只打印响应 JSON 的这些字段（可重复；支持点路径 a.b.0.c）
     public readonly List<(string Name, string Value)> Headers = new();
     public readonly List<(string Name, string Value)> Query = new();   // -q k=v，追加到任何子命令 URL
     public bool Verbose;
@@ -104,7 +104,7 @@ internal static class ZcurlCli
                         case "--key": o.Key = v; break;
                         case "--key-b": o.KeyB = v; break;
                         case "--out": o.OutFile = v; break;
-                        case "--field": o.Field = v; break;
+                        case "--field": o.Fields.Add(v); break;
                         case "-q":
                             int eq = v.IndexOf('=');
                             if (eq <= 0) { o.Fatal = $"-q 需要 \"k=v\" 形式，收到 {v}"; return o; }

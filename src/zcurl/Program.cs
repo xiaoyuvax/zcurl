@@ -183,35 +183,43 @@ async Task<int> SendAsync(string method, string url, string? key, ReadOnlyMemory
         // Puppet 的密钥错误伪装成 404（不是 401），排障第一步就是查 key —— 免得被当成"路由不存在"
         if (resp.StatusCode == System.Net.HttpStatusCode.NotFound)
             Console.Error.WriteLine("  提示: 404 常是 Bearer 密钥不对（Puppet 密钥错误返回 404 而非 401）→ 检查 --key / $ZCURL_KEY");
+        else if (resp.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+            Console.Error.WriteLine("  提示: 401 是 B 面 /appagent/* 密钥不对（credential-invalid）→ 检查 --key-b / $ZCURL_KEY_B");
 
         if (o.OutFile is not null)
         {
             var path = ZcurlCli.MaybeDecode(o.OutFile);
             using (var f = File.Create(path))
                 await resp.Content.CopyToAsync(f);
-            Console.Error.WriteLine($"[{(int)resp.StatusCode}] {new FileInfo(path).Length}B -> {path}");
+            if (o.Verbose) Console.Error.WriteLine($"[{(int)resp.StatusCode}] {new FileInfo(path).Length}B -> {path}");
         }
-        else if (o.Field is not null)
+        else if (o.Fields.Count > 0)
         {
             using var ms = new MemoryStream();
             await resp.Content.CopyToAsync(ms);
             var text = Encoding.UTF8.GetString(ms.GetBuffer(), 0, (int)ms.Length);
-            var field = ZcurlCli.ExtractField(text, o.Field);
-            if (field is null)
+            var parts = new List<string>(o.Fields.Count);
+            foreach (var f in o.Fields)
             {
-                Console.Error.WriteLine($"[{(int)resp.StatusCode}] {size} (字段 {o.Field} 不存在或响应不是 JSON)");
-                Console.Error.WriteLine(text.Length > 2048 ? text[..2048] : text);
-                return 1;
+                var field = ZcurlCli.ExtractField(text, f);
+                if (field is null)
+                {
+                    Console.Error.WriteLine($"zcurl: 字段 {f} 不存在或响应不是 JSON");
+                    Console.Error.WriteLine(text.Length > 2048 ? text[..2048] : text);
+                    return 1;
+                }
+                parts.Add(field);
             }
-            var ascii = Encoding.UTF8.GetBytes(field);
-            await Console.OpenStandardOutput().WriteAsync(ascii);
-            Console.Error.WriteLine($"[{(int)resp.StatusCode}] field:{o.Field} {ascii.Length}B");
+            var outBytes = Encoding.UTF8.GetBytes(string.Join("\n", parts));
+            using (var stdout = Console.OpenStandardOutput())
+                await stdout.WriteAsync(outBytes);
+            if (o.Verbose) Console.Error.WriteLine($"[{(int)resp.StatusCode}] fields:{string.Join(",", o.Fields)} {outBytes.Length}B");
         }
         else
         {
             using var stdout = Console.OpenStandardOutput();
             await resp.Content.CopyToAsync(stdout);
-            Console.Error.WriteLine($"[{(int)resp.StatusCode}] {size}");
+            if (o.Verbose) Console.Error.WriteLine($"[{(int)resp.StatusCode}] {size}");
         }
         int status = (int)resp.StatusCode;
         if (o.ExpectStatus is { } exp && status != exp)
@@ -372,11 +380,11 @@ internal static class Usage
           --base URL        子命令基址，默认 $ZCURL_BASE 或 http://127.0.0.1:9090
           --key KEY         Bearer（A 面），默认 $ZCURL_KEY
           --key-b KEY       Bearer（B 面），默认 $ZCURL_KEY_B 或 --key
-          --field NAME      只打印响应 JSON 的该字段（字符串去引号；支持点路径 a.b.0.c，数段索引数组）
+          --field NAME      只打印响应 JSON 的该字段（可重复=多字段逐行；字符串去引号；支持点路径 a.b.0.c）
           -H "Name: Value"  追加请求头（可重复）
           -q k=v            追加 URL query（可重复；子命令与原始模式通用，registry 过滤 / logs maxLen 等）
           --out FILE        响应写入文件（字节原样）；路径可百分号编码绕开 argv
-          -v                请求行/请求头打到 stderr（key 脱敏；--profile 落选档案也列出）
+          -v                请求行/请求头/状态行打到 stderr（key 脱敏；--profile 落选档案也列出）；不加则 stderr 静默
           -h, --help        本帮助
 
         body 形状（三套，写错会 exit 2）
@@ -394,6 +402,8 @@ internal static class Usage
           不是 curl：不支持 -X/-d/-o/--noproxy 等参数（未知选项直接 exit 2）；代理一律直连（UseProxy=false）。
           PS 控制台读中文响应先设 [Console]::OutputEncoding = [Text.Encoding]::UTF8，否则显示为 GBK 乱码。
           404 常是 Bearer 密钥不对（Puppet 密钥错误返回 404 而非 401），先查 --key / $ZCURL_KEY。
+          B 面（/appagent/*）密钥错返回 401 credential-invalid，查 --key-b / $ZCURL_KEY_B。
+          stderr 默认静默（仅 -v 或出错/提示时才有输出），避免 PS 5.1 把状态行当 NativeCommandError。
           退出码 0=2xx 或 --expect 匹配  1=HTTP/网络失败/字段缺失/expect 不匹配/超时  2=用法或编码错误
         """;
 }

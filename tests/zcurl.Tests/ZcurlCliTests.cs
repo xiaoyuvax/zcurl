@@ -92,8 +92,8 @@ public class ZcurlCliTests
     [Fact]
     public void Parse_FieldOption_IsCaptured()
     {
-        var o = ZcurlCli.Parse(["get", "App#1", "Text", "--field", "value"]);
-        Assert.Equal("value", o.Field);
+        var o = ZcurlCli.Parse(["get", "App#1", "Text", "--field", "value", "--field", "type"]);
+        Assert.Equal(["value", "type"], o.Fields);
         Assert.Null(o.Fatal);
         Assert.NotNull(ZcurlCli.Parse(["--field"]).Fatal);   // 缺取值
     }
