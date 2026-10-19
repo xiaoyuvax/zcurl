@@ -9,7 +9,7 @@
 单文件 `zcurl.exe`（**3.77 MB**，NativeAOT，无运行时依赖），放进 PATH 即用：
 
 ```powershell
- Invoke-WebRequest 'https://github.com/xiaoyuvax/zcurl/releases/download/v0.3.0/zcurl.exe' -OutFile .\zcurl.exe
+ Invoke-WebRequest 'https://github.com/xiaoyuvax/zcurl/releases/download/v0.5.0/zcurl.exe' -OutFile .\zcurl.exe
 .\zcurl.exe selftest                                     # 本地回环自检，不访问外网
 Get-FileHash .\zcurl.exe -Algorithm SHA256               # 与 zcurl.exe.sha256 比对
 ```
