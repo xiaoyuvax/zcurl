@@ -127,7 +127,12 @@ async Task<(ReadOnlyMemory<byte> Body, BodyKind Kind, string? Error)> ReadBodyAs
         var copy = src.CopyToAsync(ms);
         try { await copy.WaitAsync(TimeSpan.FromSeconds(20)); }
         catch (TimeoutException) { return (default, BodyKind.None, "stdin 20 秒未关闭（可能继承了未关闭的管道）；请确认管道已结束再执行"); }
-        return (ms.GetBuffer().AsMemory(0, (int)ms.Length), BodyKind.Stdin, null);  // 零拷贝：直接借用缓冲区
+        var bytes = ms.GetBuffer().AsMemory(0, (int)ms.Length);
+        // stdin 载荷必须是 UTF-8。shell 管道若按 GBK/ANSI 编码写入（cmd chcp 936、$OutputEncoding 非 UTF8），
+        // 服务端会收到乱码——这里只告警不拦截（stdin 也允许原始字节），提示改用 --body-env/--body-file。
+        if (bytes.Length > 0 && !System.Text.Unicode.Utf8.IsValid(bytes.Span))
+            Console.Error.WriteLine("zcurl: 警告：stdin 载荷非合法 UTF-8（疑似管道按 GBK/ANSI 编码写入，服务端将收到乱码）。中文载荷请改用 --body-env 或 --body-file。");
+        return (bytes, BodyKind.Stdin, null);  // 零拷贝：直接借用缓冲区
     }
 
     return (default, BodyKind.None, null);
