@@ -6,12 +6,12 @@ In one line: **ASCII-only argv; Chinese payloads go through stdin or an environm
 
 ## Download
 
-Single-file `zcurl.exe` (**3.77 MB**, NativeAOT, no runtime dependencies) — drop it on your `PATH`:
+Single-file `zcurl.exe` (**4.40 MB**, NativeAOT, no runtime dependencies) — drop it on your `PATH`:
 
 ```powershell
- Invoke-WebRequest 'https://github.com/xiaoyuvax/zcurl/releases/download/v0.3.0/zcurl.exe' -OutFile .\zcurl.exe
+ Invoke-WebRequest 'https://github.com/xiaoyuvax/zcurl/releases/download/v0.6.0/zcurl.exe' -OutFile .\zcurl.exe
 .\zcurl.exe selftest                        # loopback self-test, never touches the network
-Get-FileHash .\zcurl.exe -Algorithm SHA256  # compare against zcurl.exe.sha256
+Get-FileHash .\zcurl.exe -Algorithm SHA256  # compare against the SHA256 on the release page
 ```
 
 - Releases: <https://github.com/xiaoyuvax/zcurl/releases/latest>
@@ -46,7 +46,7 @@ dotnet test                             # unit tests (pure logic, no network)
 
 Requires .NET 10 SDK plus the C++ AOT workload.
 
-Publish switches (`zcurl.csproj`): `OptimizationPreference=Size` plus disabled diagnostics activity / EventSource / metadata updater / debugger / exception stack traces. Measured **smaller and faster** than the `Speed` configuration: 3.70 MB vs 4.87 MB, startup 32 ms vs 34 ms, loopback request 39 vs 44 ms (`bench.ps1`). Trade-off: crashes report the exception message without a stack — every exception is caught in-process and rendered as a single line anyway.
+Publish switches (`zcurl.csproj`): `OptimizationPreference=Size` plus disabled diagnostics activity / EventSource / metadata updater / debugger / exception stack traces. Measured on the v0.5 baseline as **smaller and faster** than the `Speed` configuration: 3.70 MB vs 4.87 MB, startup 32 ms vs 34 ms, loopback request 39 vs 44 ms (`bench.ps1`). Trade-off: crashes report the exception message without a stack — every exception is caught in-process and rendered as a single line anyway.
 
 What is left is the HTTPS client itself and cannot be cut: measured, `System.Net.Http` (sockets + TLS) is 1.80 MB (46%) of the exe, `selftest` 0.30 MB, the `System.Text.Json` DOM 0.15 MB, and the AOT runtime floor 0.87 MB. Swapping in `HttpClientHandler` makes it 0.26 MB *bigger*, and the native Windows WinHTTP switch measured as a no-op.
 

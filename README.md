@@ -6,12 +6,12 @@
 
 ## 下载
 
-单文件 `zcurl.exe`（**3.77 MB**，NativeAOT，无运行时依赖），放进 PATH 即用：
+单文件 `zcurl.exe`（**4.40 MB**，NativeAOT，无运行时依赖），放进 PATH 即用：
 
 ```powershell
- Invoke-WebRequest 'https://github.com/xiaoyuvax/zcurl/releases/download/v0.5.0/zcurl.exe' -OutFile .\zcurl.exe
+ Invoke-WebRequest 'https://github.com/xiaoyuvax/zcurl/releases/download/v0.6.0/zcurl.exe' -OutFile .\zcurl.exe
 .\zcurl.exe selftest                                     # 本地回环自检，不访问外网
-Get-FileHash .\zcurl.exe -Algorithm SHA256               # 与 zcurl.exe.sha256 比对
+Get-FileHash .\zcurl.exe -Algorithm SHA256               # 与 Release 页 SHA256 比对
 ```
 
 - 下载页：<https://github.com/xiaoyuvax/zcurl/releases/latest>
@@ -40,13 +40,13 @@ zcurl 把这些坑全部排除在**工具边界之外**：命令行里出现任�
 
 ```powershell
 dotnet build -c Release                 # 普通编译
-dotnet publish -c Release -r win-x64    # 单文件 AOT exe → src\zcurl\bin\Release\net10.0\win-x64\publish\zcurl.exe（3.77 MB）
+dotnet publish -c Release -r win-x64    # 单文件 AOT exe → src\zcurl\bin\Release\net10.0\win-x64\publish\zcurl.exe（4.40 MB）
 dotnet test                             # 单元测试（纯逻辑，无网络）
 ```
 
 要求 .NET 10 SDK + C++ AOT 工作负载。
 
-发布开关（`zcurl.csproj`）：`OptimizationPreference=Size` + 关诊断活动/EventSource/元数据更新器/调试器/异常堆栈。实测比 `Speed` 配置**更小也更快**：3.70 MB vs 4.87 MB，启动 32ms vs 34ms，回环请求 39 vs 44 ms（`bench.ps1`）。代价是崩溃时只报异常消息、不带堆栈——所有异常都在程序内 catch 成一行提示，影响可忽略。
+发布开关（`zcurl.csproj`）：`OptimizationPreference=Size` + 关诊断活动/EventSource/元数据更新器/调试器/异常堆栈。v0.5 基线实测比 `Speed` 配置**更小也更快**：3.70 MB vs 4.87 MB，启动 32ms vs 34ms，回环请求 39 vs 44 ms（`bench.ps1`）。代价是崩溃时只报异常消息、不带堆栈——所有异常都在程序内 catch 成一行提示，影响可忽略。
 
 剩下的体积是 HTTPS 客户端本体，砍不动：实测 `System.Net.Http`（含 Sockets + TLS）占 1.80 MB（46%），`selftest` 占 0.30 MB，`System.Text.Json` DOM 占 0.15 MB，AOT 运行时地板 0.87 MB。换 `HttpClientHandler` 反而大 0.26 MB（Windows 原生 WinHTTP 开关实测无效）。
 
