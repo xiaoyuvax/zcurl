@@ -12,7 +12,7 @@ license: MIT
 - 操作 **Puppet.Core 宿主应用**的 `/agent/*`、`/appagent/*` 端点。
 - 任何「用 curl 发中文 JSON 会乱码 / 吞引号」的场景。
 
-不要用它：上传文件、multipart、cookie、走代理（这些 curl 更合适；zcurl 显式 `UseProxy=false`）。
+不要用它：上传文件、multipart、cookie（这些仍用 curl）。代理已支持：默认直连，`--proxy` 走 `HTTPS_PROXY`/`HTTP_PROXY`（无则系统代理），`--proxy=URL` 指定代理。
 
 ## 安装与自检
 
@@ -24,6 +24,19 @@ Get-FileHash .\zcurl.exe -Algorithm SHA256   # 与 Release 页 sha256 比对
 zcurl selftest                               # 期望 ALL PASS (3/3)
 zcurl -h                                     # 用法
 ```
+
+## 代理
+
+默认直连（保证 127.0.0.1 的 Puppet 不被劫持）。需要走 VPN 时：
+
+```bash
+zcurl GET 'https://api.hotapi.ai/v1/models' --key "$K" --proxy
+zcurl GET 'https://api.hotapi.ai/v1/models' --key "$K" --proxy=http://127.0.0.1:7897
+```
+
+- `--proxy`：取 `HTTPS_PROXY` > `HTTP_PROXY`，都没有时用系统代理。
+- `--proxy=URL`：显式 http(s) 代理。
+- `--no-proxy`：强制直连（默认）。
 
 ## 三条铁律（违反必出错）
 
@@ -103,7 +116,7 @@ printf '{}' | zcurl POST 'http://127.0.0.1:9090/agent/control?name=MainForm&ctrl
 ## 踩坑
 
 - **别把中文写进 argv**（PS/bash 都会坏），永远走 stdin / `--body-env` / `--body-file`。
-- **这不是 curl**：`-X` / `-d` / `-o` / `--noproxy` 等未知选项直接 exit 2 并提示；zcurl 固定直连（`UseProxy=false`），别带 curl 的代理参数。
+- **这不是 curl**：`-X` / `-d` / `-o` / `--noproxy` 等未知选项直接 exit 2 并提示；代理用 zcurl 自己的 `--proxy` / `--proxy=URL` / `--no-proxy`。
 - **404 先查 key**：Puppet 密钥错误返回 404 而非 401 → 检查 `--key` / `$ZCURL_KEY`（B 面 `--key-b` / `$ZCURL_KEY_B`），别改 URL。
 - **PS 字符串管道**默认 `$OutputEncoding=ASCII` → 变 `????`，且会追加 `\r\n`（设成 `[Text.Encoding]::UTF8` 也一样会加 BOM）；要精确字节别用 PS 管道，用 `--body-env`。
 - `--body-env` 的变量必须当次赋值，别复用旧变量。

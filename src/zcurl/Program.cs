@@ -5,6 +5,7 @@
 //   2. URL 与子命令参数里的非 ASCII 必须先百分号编码（printf '%s' 中文 | zcurl enc）。
 //   3. stdout = 原始响应字节；stderr = 状态行；exit 0=2xx，1=HTTP/网络失败，2=用法或编码错误。
 using System.Diagnostics;
+using System.Net;
 using System.Net.Http;
 using System.Text;
 using Zcurl;
@@ -142,7 +143,13 @@ async Task<(ReadOnlyMemory<byte> Body, BodyKind Kind, string? Error)> ReadBodyAs
 async Task<int> SendAsync(string method, string url, string? key, ReadOnlyMemory<byte> body, CliOptions o)
 {
     url = ZcurlCli.ApplyQuery(url, o.Query);   // -q k=v：子命令与原始模式通用
-    using var client = new HttpClient(new SocketsHttpHandler { UseProxy = false, Proxy = null });
+    var handler = new SocketsHttpHandler { UseProxy = o.UseProxy, Proxy = null };
+    if (o.UseProxy)
+    {
+        string? proxyUrl = ZcurlCli.ProxyUrlFor(o);
+        if (proxyUrl is not null) handler.Proxy = new WebProxy(proxyUrl) { BypassProxyOnLocal = true };
+    }
+    using var client = new HttpClient(handler);
     if (o.TimeoutMs is { } tmo) client.Timeout = TimeSpan.FromMilliseconds(tmo);
     using var req = new HttpRequestMessage(new HttpMethod(method), url);
 
@@ -176,6 +183,7 @@ async Task<int> SendAsync(string method, string url, string? key, ReadOnlyMemory
         foreach (var (n, v) in o.Headers)
             Console.Error.WriteLine($"> {n}: {v}");
         Console.Error.WriteLine($"> Authorization: {(string.IsNullOrEmpty(key) ? "(none)" : "Bearer ***")}");
+        if (o.UseProxy) Console.Error.WriteLine($"> proxy: {ZcurlCli.ProxyUrlFor(o) ?? "(system)"}");
         Console.Error.WriteLine($"> body: {body.Length}B");
     }
 
@@ -389,6 +397,9 @@ internal static class Usage
           -H "Name: Value"  追加请求头（可重复）
           -q k=v            追加 URL query（可重复；子命令与原始模式通用，registry 过滤 / logs maxLen 等）
           --out FILE        响应写入文件（字节原样）；路径可百分号编码绕开 argv
+          --proxy           走 HTTPS_PROXY/HTTP_PROXY（本机 VPN）；未设置则用系统代理
+          --proxy=URL       走指定 http(s) 代理（如 --proxy=http://127.0.0.1:7897）
+          --no-proxy        强制直连（默认）
           -v                请求行/请求头/状态行打到 stderr（key 脱敏；--profile 落选档案也列出）；不加则 stderr 静默
           -h, --help        本帮助
 
@@ -404,7 +415,7 @@ internal static class Usage
                     PS    $env:B='...'; zcurl POST $URL --body-env B
           中文 URL/参数：printf '%s' '中文' | zcurl enc
           已含 %XX 的值视为已编码，不会二次编码。
-          不是 curl：不支持 -X/-d/-o/--noproxy 等参数（未知选项直接 exit 2）；代理一律直连（UseProxy=false）。
+          不是 curl：不支持 -X/-d/-o 等参数（未知选项直接 exit 2）；默认直连，--proxy 走 HTTPS_PROXY/HTTP_PROXY（无则系统代理），--proxy=URL 指定代理。
           PS 控制台读中文响应先设 [Console]::OutputEncoding = [Text.Encoding]::UTF8，否则显示为 GBK 乱码。
           404 常是 Bearer 密钥不对（Puppet 密钥错误返回 404 而非 401），先查 --key / $ZCURL_KEY。
           B 面（/appagent/*）密钥错返回 401 credential-invalid，查 --key-b / $ZCURL_KEY_B。

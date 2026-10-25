@@ -71,7 +71,7 @@ zcurl selftest                           本地回环字节保真自检（不访
 `--profile APP` 读 `%LOCALAPPDATA%\Puppet.AppAgents\APP.*.json`（解析成功且 pid 存活取最新；全部失效 exit 2 并列出原因），大载荷用 `--body-file`（`--body-env` 受环境块约 32K 字符上限约束）。
 
 body 形状三套，写错 exit 2：`set` = JSON 值、`invoke` = JSON 数组、`action` = JSON 对象。
-zcurl **不是 curl**：`-X` / `-d` / `-o` / `--noproxy` 等一律 exit 2 并提示（代理固定 `UseProxy=false` 直连）。
+zcurl **不是 curl**：`-X` / `-d` / `-o` / `--noproxy` 等一律 exit 2 并提示；代理默认直连，用 `--proxy` 走 `HTTPS_PROXY`/`HTTP_PROXY`（无则系统代理），`--proxy=URL` 指定代理。
 Puppet 返回 **404 常是 Bearer 密钥不对**（密钥错误伪装成 404 而非 401）→ 先查 `--key` / `$ZCURL_KEY`，stderr 会带这行提示。
 PS 控制台读中文响应先设 `[Console]::OutputEncoding = [Text.Encoding]::UTF8`，否则显示为 GBK 乱码（zcurl 本身不改编码）。
 
@@ -182,7 +182,7 @@ zcurl selftest     # 起本地回环服务，分别用 stdin、--body-env 与 --
 
 ## 已知边界
 
-- 不支持文件上传 / multipart / cookie jar / 代理（`UseProxy=false`，专攻本机与内网回环）。
+- 不支持文件上传 / multipart / cookie jar；代理可选（`--proxy` / `--proxy=URL`，默认直连）。
 - `--body-env` 值受 Windows 环境块限制（约 32K 字符）；更大的载荷用 stdin 或 `--body-file`。
 - PS 管道写入会追加 `\r\n` 并可能加 BOM，要精确控制字节就别走 PS 字符串管道。
 - 响应无 `Content-Length`（chunked）时，stderr 状态行的字节数显示 `?B`（`--out` 仍报落盘文件的精确字节数）。

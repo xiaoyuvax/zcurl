@@ -71,7 +71,7 @@ Value precedence: explicit flag > `--profile` file > `$ZCURL_*` env var > defaul
 `--profile APP` reads `%LOCALAPPDATA%\Puppet.AppAgents\APP.*.json` (newest entry that parses and has a live pid; all dead/invalid → `exit 2` listing why). For large payloads use `--body-file` (`--body-env` is capped at ~32K chars by the Windows environment block).
 
 Three body shapes, wrong one → `exit 2`: `set` = JSON value, `invoke` = JSON array, `action` = JSON object.
-zcurl is **not curl**: `-X` / `-d` / `-o` / `--noproxy` and friends are rejected (`exit 2`) with a hint; proxies are always off (`UseProxy=false`).
+zcurl is **not curl**: `-X` / `-d` / `-o` / `--noproxy` and friends are rejected (`exit 2`) with a hint; proxying is off by default (`--proxy` uses `HTTPS_PROXY`/`HTTP_PROXY`, falling back to the system proxy; `--proxy=URL` sets one explicitly).
 A Puppet **404 usually means a bad Bearer key** (wrong key returns 404, not 401) → check `--key` / `$ZCURL_KEY`; stderr carries that hint.
 To read Chinese responses in a PowerShell console, set `[Console]::OutputEncoding = [Text.Encoding]::UTF8` first, otherwise the console renders GBK mojibake (zcurl never re-encodes).
 
@@ -162,7 +162,7 @@ zcurl selftest    # spins up a loopback server, sends once each via stdin, --bod
 
 ## Known limits
 
-- No file upload / multipart / cookie jar / proxy (proxies are explicitly disabled — this tool targets loopback and LAN endpoints).
+- No file upload / multipart / cookie jar. Proxying is optional (`--proxy` / `--proxy=URL`); the default is direct.
 - `--body-env` is bounded by the Windows environment block (~32K chars); use stdin or `--body-file` for larger payloads.
 - A PowerShell string pipe appends `\r\n` and may prepend a BOM; do not use it when you need exact bytes.
 - When a response has no `Content-Length` (chunked), the stderr status line shows `?B` for the byte count (`--out` still reports the exact file size).

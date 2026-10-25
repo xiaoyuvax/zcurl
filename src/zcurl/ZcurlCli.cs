@@ -23,6 +23,8 @@ internal sealed class CliOptions
     public readonly List<(string Name, string Value)> Headers = new();
     public readonly List<(string Name, string Value)> Query = new();   // -q k=v，追加到任何子命令 URL
     public bool Verbose;
+    public bool UseProxy;                   // --proxy：走 HTTPS_PROXY/HTTP_PROXY（无则系统代理）
+    public string? ProxyUrl;                // --proxy=URL：显式代理
     public string? Fatal;
 }
 
@@ -71,6 +73,13 @@ internal static class ZcurlCli
                 case "-v":
                     o.Verbose = true;
                     break;
+                case "--proxy":
+                    o.UseProxy = true;
+                    break;
+                case "--no-proxy":
+                    o.UseProxy = false;
+                    o.ProxyUrl = null;
+                    break;
                 case "--body-env":
                 case "--body-file":
                 case "--profile":
@@ -118,6 +127,18 @@ internal static class ZcurlCli
                     }
                     break;
                 default:
+                    if (a.StartsWith("--proxy=", StringComparison.Ordinal))
+                    {
+                        string proxyValue = a["--proxy=".Length..];
+                        if (!IsValidProxyUrl(proxyValue))
+                        {
+                            o.Fatal = $"--proxy 需要 http(s):// 代理地址，收到 {proxyValue}";
+                            return o;
+                        }
+                        o.ProxyUrl = proxyValue;
+                        o.UseProxy = true;
+                        break;
+                    }
                     if (a.StartsWith("--", StringComparison.Ordinal))
                     { o.Fatal = $"未知选项 {a}（zcurl 不是 curl，没有 {a}；用法见 zcurl -h）"; return o; }
                     if (a.Length > 1 && a[0] == '-')
@@ -240,6 +261,31 @@ internal static class ZcurlCli
                 best = c;
         return best;
     }
+
+    // ---------- 代理（默认直连；--proxy 走环境变量/系统代理，--proxy=URL 指定） ----------
+
+    /// <summary>是否是可用的 http/https 代理地址。</summary>
+    public static bool IsValidProxyUrl(string s)
+        => !string.IsNullOrWhiteSpace(s)
+           && Uri.TryCreate(s.Trim(), UriKind.Absolute, out var u)
+           && (u.Scheme == Uri.UriSchemeHttp || u.Scheme == Uri.UriSchemeHttps);
+
+    /// <summary>代理地址优先级：显式 --proxy=URL > HTTPS_PROXY > HTTP_PROXY。无 → null（用系统代理）。</summary>
+    public static string? ResolveProxyUrl(string? explicitUrl, string? httpsProxy, string? httpProxy)
+    {
+        string? raw = explicitUrl;
+        if (string.IsNullOrWhiteSpace(raw)) raw = httpsProxy;
+        if (string.IsNullOrWhiteSpace(raw)) raw = httpProxy;
+        if (string.IsNullOrWhiteSpace(raw)) return null;
+
+        raw = raw.Trim();
+        if (!raw.Contains("://", StringComparison.Ordinal)) raw = "http://" + raw;
+        return IsValidProxyUrl(raw) ? raw : null;
+    }
+
+    /// <summary>按当前选项与环境变量解析代理地址（--proxy 时使用）。</summary>
+    public static string? ProxyUrlFor(CliOptions o)
+        => ResolveProxyUrl(o.ProxyUrl, Env("HTTPS_PROXY"), Env("HTTP_PROXY"));
 
     // ---------- --expect 退出码语义 ----------
 
